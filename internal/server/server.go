@@ -9,22 +9,40 @@ import (
 
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+
+	"github.com/zeebo/blake3"
 )
 
 type Server struct {
 	httpServer *http.Server
 }
 
-func New(listen string) (*Server, error) {
+type Config struct {
+	Listen   string
+	Secret   string
+	Issuer   string
+	Insecure bool
+}
+
+func New(cfg *Config) (*Server, error) {
 	s := &Server{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "pong", http.StatusOK)
 	})
+
+	storage := newStorage()
+	key := blake3.Sum256([]byte(cfg.Secret))
+	provider, err := newOP(context.Background(), storage, key, cfg.Insecure, cfg.Issuer)
+	if err != nil {
+		return nil, err
+	}
+	mux.Handle("/", provider.HttpHandler())
+
 	h := h2c.NewHandler(mux, &http2.Server{})
 
 	s.httpServer = &http.Server{
-		Addr:              listen,
+		Addr:              cfg.Listen,
 		Handler:           h,
 		ReadHeaderTimeout: time.Second,
 	}
